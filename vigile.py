@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Vigile — automated monthly home maintenance briefing."""
 
+import calendar
 import html
 import os
 import smtplib
@@ -126,27 +127,12 @@ Produce exactly these 6 sections, in this order:
 - Never overwhelming — prioritize ruthlessly
 """
 
-SECTION_COLORS = {
-    "🔴": "#c0392b",
-    "🟡": "#d68910",
-    "🟢": "#1e8449",
-    "💡": "#2471a3",
+SECTION_STYLES = {
+    "🔴": ("#c0392b", "#fff5f5"),
+    "🟡": ("#d68910", "#fffbf0"),
+    "🟢": ("#1e8449", "#f0fff4"),
+    "💡": ("#2471a3", "#f0f8ff"),
 }
-
-MONTH_NAMES = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-]
 
 
 def get_season(month: int) -> str:
@@ -159,45 +145,149 @@ def get_season(month: int) -> str:
     return "Winter"
 
 
-def build_html(brief_text: str) -> str:
-    lines = brief_text.split("\n")
-    html_parts = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            html_parts.append("<br>")
-            continue
-        section_color = None
-        for emoji, color in SECTION_COLORS.items():
-            if stripped.startswith(emoji):
-                section_color = color
-                break
-        escaped = html.escape(stripped)
-        if section_color:
-            style = (
-                f"font-size: 18px; font-weight: bold; color: {section_color};"
-                " margin: 24px 0 8px 0;"
+def _parse_sections(brief_text: str) -> list[tuple[str | None, str, str, str]]:
+    """Parse brief_text into sections: (emoji, border_color, bg_color, content_html)."""
+    sections: list[tuple[str | None, str, str, str]] = []
+    current_emoji: str | None = None
+    current_color = "#444444"
+    current_bg = "#f9f9f9"
+    current_lines: list[str] = []
+
+    def flush() -> None:
+        if current_lines:
+            content = "<br>".join(
+                html.escape(ln.strip()) for ln in current_lines if ln.strip()
             )
-            html_parts.append(f'<p style="{style}">{escaped}</p>')
-        else:
-            html_parts.append(f'<p style="margin: 4px 0;">{escaped}</p>')
-    body_html = "\n".join(html_parts)
-    container_style = (
-        "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;"
-        " max-width: 640px; margin: 0 auto; padding: 24px;"
-        " line-height: 1.6; color: #1a1a1a; background: #ffffff;"
+            sections.append((current_emoji, current_color, current_bg, content))
+
+    for line in brief_text.split("\n"):
+        stripped = line.strip()
+        matched = False
+        for emoji, (color, bg) in SECTION_STYLES.items():
+            if stripped.startswith(emoji):
+                flush()
+                current_lines = [stripped]
+                current_emoji = emoji
+                current_color = color
+                current_bg = bg
+                matched = True
+                break
+        if not matched:
+            current_lines.append(stripped)
+
+    flush()
+    return sections
+
+
+def _render_section_card(emoji: str | None, color: str, bg: str, content: str) -> str:
+    is_header = emoji is not None
+    border = f"4px solid {color}"
+    card_style = (
+        f"background: {bg};"
+        f" border-left: {border};"
+        " border-radius: 6px;"
+        " padding: 16px 20px;"
+        " margin: 16px 0;"
+    )
+    text_style = (
+        "font-family: Georgia, 'Times New Roman', serif;"
+        " font-size: 15px;"
+        " line-height: 1.7;"
+        " color: #2c2c2c;"
+        " margin: 0;"
+    )
+    if is_header:
+        # Split first line (header) from body lines
+        parts = content.split("<br>", 1)
+        header_html = (
+            f'<p style="font-family: Georgia, serif; font-size: 17px;'
+            f' font-weight: bold; color: {color}; margin: 0 0 10px 0;">'
+            f"{parts[0]}</p>"
+        )
+        body_html = (
+            f'<p style="{text_style}">{parts[1]}</p>'
+            if len(parts) > 1 and parts[1]
+            else ""
+        )
+        return f'<div style="{card_style}">{header_html}{body_html}</div>'
+    return f'<div style="{card_style}"><p style="{text_style}">{content}</p></div>'
+
+
+def _wrap_html_document(body: str, month_name: str, year: int) -> str:
+    outer = (
+        "font-family: Georgia, 'Times New Roman', serif;"
+        " background: #f4f1ec;"
+        " margin: 0; padding: 32px 16px;"
+    )
+    container = (
+        "background: #ffffff;"
+        " max-width: 620px;"
+        " margin: 0 auto;"
+        " border-radius: 10px;"
+        " overflow: hidden;"
+        " box-shadow: 0 2px 12px rgba(0,0,0,0.08);"
+    )
+    header = "background: #1a2e1a; padding: 28px 32px 24px; text-align: center;"
+    logo_style = (
+        "font-family: Georgia, serif;"
+        " font-size: 26px;"
+        " font-weight: bold;"
+        " color: #e8dfc8;"
+        " margin: 0 0 4px 0;"
+        " letter-spacing: 1px;"
+    )
+    date_style = (
+        "font-family: Georgia, serif;"
+        " font-size: 13px;"
+        " color: #8fa68f;"
+        " margin: 0;"
+        " letter-spacing: 2px;"
+        " text-transform: uppercase;"
+    )
+    content_style = "padding: 24px 32px 32px;"
+    footer_style = (
+        "border-top: 1px solid #ede8df;"
+        " padding: 16px 32px;"
+        " text-align: center;"
+        " font-family: Georgia, serif;"
+        " font-size: 12px;"
+        " color: #aaa;"
     )
     return (
         "<!DOCTYPE html>\n"
-        "<html>\n"
-        f'<body style="{container_style}">\n'
-        f"{body_html}\n"
+        '<html lang="en">\n'
+        "<head>"
+        '<meta charset="UTF-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+        f"<title>Vigile — {html.escape(month_name)} {year}</title>"
+        "</head>\n"
+        f'<body style="{outer}">\n'
+        f'  <div style="{container}">\n'
+        f'    <div style="{header}">\n'
+        f'      <p style="{logo_style}">🏠 Vigile</p>\n'
+        f'      <p style="{date_style}">{html.escape(month_name)} {year}</p>\n'
+        "    </div>\n"
+        f'    <div style="{content_style}">\n'
+        f"{body}\n"
+        "    </div>\n"
+        f'    <div style="{footer_style}">Your home, looked after.</div>\n'
+        "  </div>\n"
         "</body>\n"
         "</html>"
     )
 
 
+def build_html(brief_text: str, month_name: str, year: int) -> str:
+    sections = _parse_sections(brief_text)
+    cards = "\n".join(
+        _render_section_card(emoji, color, bg, content)
+        for emoji, color, bg, content in sections
+    )
+    return _wrap_html_document(cards, month_name, year)
+
+
 def send_email(
+    plain_body: str,
     html_body: str,
     subject: str,
     sender: str,
@@ -208,7 +298,8 @@ def send_email(
     msg["Subject"] = subject
     msg["From"] = sender
     msg["To"] = ", ".join(recipients)
-    msg.attach(MIMEText(html_body, "html"))
+    msg.attach(MIMEText(plain_body, "plain"))  # fallback for plain-text clients
+    msg.attach(MIMEText(html_body, "html"))  # preferred; must be last per RFC 2046
     with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
         smtp.starttls()
         smtp.login(sender, password)
@@ -227,7 +318,6 @@ def main() -> None:
         print(f"Error: missing required environment variables: {', '.join(missing)}")
         sys.exit(1)
 
-    api_key = os.environ["ANTHROPIC_API_KEY"]
     gmail_address = os.environ["GMAIL_ADDRESS"]
     gmail_app_password = os.environ["GMAIL_APP_PASSWORD"]
     recipient_emails_raw = os.environ["RECIPIENT_EMAILS"]
@@ -238,7 +328,7 @@ def main() -> None:
         sys.exit(1)
 
     now = datetime.now(timezone.utc)
-    month_name = MONTH_NAMES[now.month - 1]
+    month_name = calendar.month_name[now.month]
     year = now.year
     season = get_season(now.month)
 
@@ -256,20 +346,38 @@ def main() -> None:
             messages=[{"role": "user", "content": user_prompt}],
         )
         brief_text = message.content[0].text
-    except Exception as e:
+    except anthropic.AuthenticationError as e:
+        print(f"Error: Anthropic API key is invalid or missing — {e}")
+        sys.exit(1)
+    except anthropic.RateLimitError as e:
+        print(f"Error: Anthropic API rate limit exceeded — {e}")
+        sys.exit(1)
+    except anthropic.APIError as e:
         print(f"Error calling Anthropic API: {e}")
         sys.exit(1)
 
     subject = f"🏠 Vigile — {month_name} {year} Home Brief"
-    html_body = build_html(brief_text)
+    html_body = build_html(brief_text, month_name, year)
 
     try:
-        send_email(html_body, subject, gmail_address, gmail_app_password, recipients)
-    except Exception as e:
+        send_email(
+            brief_text,
+            html_body,
+            subject,
+            gmail_address,
+            gmail_app_password,
+            recipients,
+        )
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"Error: Gmail authentication failed — check GMAIL_APP_PASSWORD — {e}")
+        sys.exit(1)
+    except smtplib.SMTPException as e:
         print(f"Error sending email: {e}")
         sys.exit(1)
 
-    print(f"Vigile brief sent for {month_name} {year} to {len(recipients)} recipient(s).")
+    print(
+        f"Vigile brief sent for {month_name} {year} to {len(recipients)} recipient(s)."
+    )
     sys.exit(0)
 
 
