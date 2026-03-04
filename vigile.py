@@ -3,17 +3,21 @@
 
 import calendar
 import html
+import json
 import os
 import smtplib
 import sys
+import urllib.request
 from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-import json
-import urllib.request
-
 import anthropic
+
+CLAUDE_MODEL = "claude-sonnet-4-20250514"
+MAX_TOKENS = 1500
+SMTP_HOST = "smtp.gmail.com"
+SMTP_PORT = 587  # Gmail SMTP with STARTTLS
 
 SYSTEM_PROMPT = """\
 You are Vigile by Ablo, a personal home guardian for Ablo — a Senior Agile Coach based in South Conroe,
@@ -131,10 +135,10 @@ Produce exactly these 6 sections, in this order:
 """
 
 SECTION_STYLES = {
-    "🔴": ("#e53e3e", "#ffffff"),
-    "🟡": ("#d97706", "#ffffff"),
-    "🟢": ("#38a169", "#ffffff"),
-    "💡": ("#3182ce", "#ffffff"),
+    "🔴": "#e53e3e",
+    "🟡": "#d97706",
+    "🟢": "#38a169",
+    "💡": "#3182ce",
 }
 
 SECTION_BADGES = {
@@ -155,12 +159,11 @@ def get_season(month: int) -> str:
     return "Winter"
 
 
-def _parse_sections(brief_text: str) -> list[tuple[str | None, str, str, str]]:
-    """Parse brief_text into sections: (emoji, border_color, bg_color, content_html)."""
-    sections: list[tuple[str | None, str, str, str]] = []
+def _parse_sections(brief_text: str) -> list[tuple[str | None, str, str]]:
+    """Parse brief_text into sections: (emoji, accent_color, content_html)."""
+    sections: list[tuple[str | None, str, str]] = []
     current_emoji: str | None = None
     current_color = "#444444"
-    current_bg = "#f9f9f9"
     current_lines: list[str] = []
 
     def flush() -> None:
@@ -168,18 +171,17 @@ def _parse_sections(brief_text: str) -> list[tuple[str | None, str, str, str]]:
             content = "<br>".join(
                 html.escape(ln.strip()) for ln in current_lines if ln.strip()
             )
-            sections.append((current_emoji, current_color, current_bg, content))
+            sections.append((current_emoji, current_color, content))
 
     for line in brief_text.split("\n"):
         stripped = line.strip()
         matched = False
-        for emoji, (color, bg) in SECTION_STYLES.items():
+        for emoji, color in SECTION_STYLES.items():
             if stripped.startswith(emoji):
                 flush()
                 current_lines = [stripped]
                 current_emoji = emoji
                 current_color = color
-                current_bg = bg
                 matched = True
                 break
         if not matched:
@@ -189,102 +191,109 @@ def _parse_sections(brief_text: str) -> list[tuple[str | None, str, str, str]]:
     return sections
 
 
-def _render_section_card(emoji: str | None, color: str, bg: str, content: str) -> str:
-    border_color = color if emoji is not None else "#94a3b8"
-    card_style = (
-        f"background: #ffffff;"
-        f" border-left: 4px solid {border_color};"
-        " padding: 20px 24px;"
-        " margin: 0;"
-        " border-bottom: 1px solid #e8e8e8;"
+_FONT = "system-ui, -apple-system, Arial, sans-serif"
+_BODY_STYLE = (
+    f"font-family: {_FONT};"
+    " font-size: 15px;"
+    " line-height: 1.65;"
+    " color: #374151;"
+    " margin: 0;"
+)
+_CARD_BASE = (
+    "background: #ffffff;"
+    " padding: 22px 28px;"
+    " margin: 0;"
+    " border-bottom: 1px solid #e8e8e8;"
+)
+
+
+def _render_section_card(emoji: str | None, color: str, content: str) -> str:
+    border_color = color if emoji is not None else "#d1d5db"
+    card_style = f"{_CARD_BASE} border-left: 5px solid {border_color};"
+    if emoji is None:
+        return f'<div style="{card_style}"><p style="{_BODY_STYLE}">{content}</p></div>'
+
+    badge_label = SECTION_BADGES.get(emoji, "")
+    badge_style = (
+        f"background: {color};"
+        " color: #ffffff;"
+        f" font-family: {_FONT};"
+        " font-size: 9px;"
+        " font-weight: bold;"
+        " letter-spacing: 1.5px;"
+        " text-transform: uppercase;"
+        " padding: 2px 7px;"
+        " border-radius: 3px;"
+        " vertical-align: middle;"
+        " margin-left: 8px;"
     )
-    body_style = (
-        "font-family: system-ui, -apple-system, Arial, sans-serif;"
+    header_style = (
+        f"font-family: {_FONT};"
         " font-size: 15px;"
-        " line-height: 1.6;"
-        " color: #374151;"
-        " margin: 0;"
+        " font-weight: 700;"
+        f" color: {color};"
+        " margin: 0 0 12px 0;"
     )
-    if emoji is not None:
-        badge_label = SECTION_BADGES.get(emoji, "")
-        badge_style = (
-            f"background: {color};"
-            " color: #ffffff;"
-            " font-family: system-ui, -apple-system, Arial, sans-serif;"
-            " font-size: 10px;"
-            " font-weight: bold;"
-            " letter-spacing: 1px;"
-            " padding: 2px 8px;"
-            " border-radius: 10px;"
-            " vertical-align: middle;"
-            " margin-left: 8px;"
-        )
-        header_style = (
-            "font-family: system-ui, -apple-system, Arial, sans-serif;"
-            " font-size: 16px;"
-            " font-weight: bold;"
-            f" color: {color};"
-            " margin: 0 0 12px 0;"
-        )
-        parts = content.split("<br>", 1)
-        header_html = (
-            f'<p style="{header_style}">'
-            f"{parts[0]}"
-            f' <span style="{badge_style}">{badge_label}</span>'
-            f"</p>"
-        )
-        body_html = (
-            f'<p style="{body_style}">{parts[1]}</p>'
-            if len(parts) > 1 and parts[1]
-            else ""
-        )
-        return f'<div style="{card_style}">{header_html}{body_html}</div>'
-    return f'<div style="{card_style}"><p style="{body_style}">{content}</p></div>'
+    parts = content.split("<br>", 1)
+    header_html = (
+        f'<p style="{header_style}">'
+        f"{parts[0]}"
+        f' <span style="{badge_style}">{badge_label}</span>'
+        f"</p>"
+    )
+    body_html = (
+        f'<p style="{_BODY_STYLE}">{parts[1]}</p>'
+        if len(parts) > 1 and parts[1]
+        else ""
+    )
+    return f'<div style="{card_style}">{header_html}{body_html}</div>'
+
+
+_OUTER_STYLE = (
+    f"font-family: {_FONT}; background: #f5f4f0; margin: 0; padding: 32px 16px;"
+)
+_CONTAINER_STYLE = (
+    "background: #ffffff;"
+    " max-width: 600px;"
+    " margin: 0 auto;"
+    " border-radius: 8px;"
+    " overflow: hidden;"
+    " box-shadow: 0 4px 24px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.04);"
+)
+_HEADER_STYLE = (
+    "background: #1b4332;"
+    " background: linear-gradient(180deg, #1b4332 0%, #2d6a4f 100%);"
+    " padding: 36px 40px;"
+    " text-align: center;"
+)
+_LOGO_STYLE = (
+    f"font-family: {_FONT};"
+    " font-size: 28px;"
+    " font-weight: 700;"
+    " color: #ffffff;"
+    " margin: 0 0 8px 0;"
+    " letter-spacing: -0.5px;"
+)
+_DATE_STYLE = (
+    f"font-family: {_FONT};"
+    " font-size: 11px;"
+    " font-weight: 600;"
+    " color: rgba(255,255,255,0.70);"
+    " margin: 0;"
+    " letter-spacing: 3px;"
+    " text-transform: uppercase;"
+)
+_FOOTER_STYLE = (
+    "padding: 24px 32px;"
+    " text-align: center;"
+    f" font-family: {_FONT};"
+    " font-size: 13px;"
+    " color: #6b7280;"
+    " border-top: 1px solid #e5e7eb;"
+)
 
 
 def _wrap_html_document(body: str, month_name: str, year: int) -> str:
-    outer = (
-        "font-family: system-ui, -apple-system, Arial, sans-serif;"
-        " background: #f0f2f5;"
-        " margin: 0; padding: 32px 16px;"
-    )
-    container = (
-        "background: #ffffff;"
-        " max-width: 600px;"
-        " margin: 0 auto;"
-        " border-radius: 8px;"
-        " overflow: hidden;"
-        " box-shadow: 0 2px 16px rgba(0,0,0,0.10);"
-    )
-    header = (
-        "background: #1a472a;"
-        " background: linear-gradient(135deg, #1a472a 0%, #2d6a4f 100%);"
-        " padding: 32px;"
-        " text-align: center;"
-    )
-    logo_style = (
-        "font-family: system-ui, -apple-system, Arial, sans-serif;"
-        " font-size: 26px;"
-        " font-weight: bold;"
-        " color: #ffffff;"
-        " margin: 0 0 6px 0;"
-        " letter-spacing: 0.5px;"
-    )
-    date_style = (
-        "font-family: system-ui, -apple-system, Arial, sans-serif;"
-        " font-size: 13px;"
-        " color: rgba(255,255,255,0.75);"
-        " margin: 0;"
-        " letter-spacing: 2px;"
-        " text-transform: uppercase;"
-    )
-    footer_style = (
-        "padding: 20px 32px;"
-        " text-align: center;"
-        " font-family: system-ui, -apple-system, Arial, sans-serif;"
-        " font-size: 12px;"
-        " color: #9ca3af;"
-    )
     return (
         "<!DOCTYPE html>\n"
         '<html lang="en">\n'
@@ -293,14 +302,14 @@ def _wrap_html_document(body: str, month_name: str, year: int) -> str:
         '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
         f"<title>Vigile by Ablo — {html.escape(month_name)} {year}</title>"
         "</head>\n"
-        f'<body style="{outer}">\n'
-        f'  <div style="{container}">\n'
-        f'    <div style="{header}">\n'
-        f'      <p style="{logo_style}">🏠 Vigile by Ablo</p>\n'
-        f'      <p style="{date_style}">{html.escape(month_name)} {year}</p>\n'
+        f'<body style="{_OUTER_STYLE}">\n'
+        f'  <div style="{_CONTAINER_STYLE}">\n'
+        f'    <div style="{_HEADER_STYLE}">\n'
+        f'      <p style="{_LOGO_STYLE}">🏠 Vigile by Ablo</p>\n'
+        f'      <p style="{_DATE_STYLE}">{html.escape(month_name)} {year}</p>\n'
         "    </div>\n"
         f"{body}\n"
-        f'    <div style="{footer_style}">Your home, looked after. · Vigile by Ablo</div>\n'
+        f'    <div style="{_FOOTER_STYLE}">Your home, looked after. · Vigile by Ablo</div>\n'
         "  </div>\n"
         "</body>\n"
         "</html>"
@@ -310,8 +319,8 @@ def _wrap_html_document(body: str, month_name: str, year: int) -> str:
 def build_html(brief_text: str, month_name: str, year: int) -> str:
     sections = _parse_sections(brief_text)
     cards = "\n".join(
-        _render_section_card(emoji, color, bg, content)
-        for emoji, color, bg, content in sections
+        _render_section_card(emoji, color, content)
+        for emoji, color, content in sections
     )
     return _wrap_html_document(cards, month_name, year)
 
@@ -330,7 +339,7 @@ def send_email(
     msg["To"] = ", ".join(recipients)
     msg.attach(MIMEText(plain_body, "plain"))  # fallback for plain-text clients
     msg.attach(MIMEText(html_body, "html"))  # preferred; must be last per RFC 2046
-    with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
         smtp.starttls()
         smtp.login(sender, password)
         smtp.sendmail(sender, recipients, msg.as_string())
@@ -369,8 +378,8 @@ def send_whatsapp(plain_body: str, month_name: str, year: int) -> None:
             with urllib.request.urlopen(req) as resp:
                 resp.read()
         print(f"WhatsApp sent to {len(recipients)} recipient(s).")
-    except Exception as exc:  # non-fatal
-        print(f"WhatsApp send failed (non-fatal): {exc}")
+    except Exception as e:  # non-fatal
+        print(f"WhatsApp send failed (non-fatal): {e}")
 
 
 def send_telegram(plain_body: str, month_name: str, year: int) -> None:
@@ -397,8 +406,8 @@ def send_telegram(plain_body: str, month_name: str, year: int) -> None:
             with urllib.request.urlopen(req) as resp:
                 resp.read()
         print(f"Telegram sent to {len(chat_ids)} chat(s).")
-    except Exception as exc:  # non-fatal
-        print(f"Telegram send failed (non-fatal): {exc}")
+    except Exception as e:  # non-fatal
+        print(f"Telegram send failed (non-fatal): {e}")
 
 
 def main() -> None:
@@ -435,8 +444,8 @@ def main() -> None:
     try:
         client = anthropic.Anthropic()
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1500,
+            model=CLAUDE_MODEL,
+            max_tokens=MAX_TOKENS,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
         )
@@ -476,8 +485,6 @@ def main() -> None:
 
     send_whatsapp(brief_text, month_name, year)
     send_telegram(brief_text, month_name, year)
-
-    sys.exit(0)
 
 
 if __name__ == "__main__":
