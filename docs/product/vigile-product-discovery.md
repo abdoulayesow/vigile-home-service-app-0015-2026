@@ -135,9 +135,9 @@
 
 ### Vision Statement
 
-> **For homeowners like Ablo — professionals with high cognitive load and high standards — Vigile is an AI-powered home guardian that delivers proactive, hyper-local, context-aware maintenance briefs directly to their inbox, before problems happen.**
+> **For homeowners like Ablo — professionals with high cognitive load and high standards — Vigile is an AI-powered home guardian that delivers proactive, hyper-local, context-aware maintenance briefs directly to their inbox and WhatsApp, before problems happen.**
 >
-> Unlike generic home apps that require you to show up and check in, Vigile shows up for you — armed with knowledge of your specific home, your climate, your lawn, your appliances, your systems — and tells you exactly what to do and why, this month, right now.
+> Unlike generic home apps that require you to show up and check in, Vigile shows up for you — armed with knowledge of your specific home, your climate, your lawn, your appliances, your systems — and tells you exactly what to do and why, this month, right now. It meets you where you already are: email for depth, WhatsApp for immediacy.
 >
 > **It turns "I should have done that" into "I'm glad I did that."**
 
@@ -145,10 +145,10 @@
 
 | Before Vigile | After Vigile |
 |---|---|
-| Pull — you remember to look | Push — it arrives in your inbox |
+| Pull — you remember to look | Push — it arrives in your inbox and WhatsApp |
 | Generic — advice for any home | Specific — your home, your systems, your city |
 | Reactive — fix what broke | Proactive — prevent what could break |
-| Siloed — only you know | Shared — wife or family looped in |
+| Siloed — only you know | Shared — wife or family looped in via email or WhatsApp |
 | Forgotten — until expensive | Timely — 1st of every month, without fail |
 | Incomplete — only what you remember | Comprehensive — Vigile flags what you forgot |
 
@@ -185,6 +185,16 @@
 | Blind spot section included | 💡 One thing Ablo likely hasn't thought about this month |
 | Multi-recipient delivery | All RECIPIENT_EMAILS addresses receive the brief |
 
+#### 💬 Epic 2B — WhatsApp Delivery *(v1.1)*
+
+| Story | Acceptance Criteria |
+|---|---|
+| WhatsApp message sent on same trigger as email | Twilio API call runs immediately after email send |
+| Brief delivered as plain-text WhatsApp message | Full brief content, no HTML — WhatsApp renders plain text only |
+| Multi-recipient WhatsApp support | All WHATSAPP_RECIPIENTS numbers receive the message |
+| Independent failure handling | WhatsApp failure does not block email delivery; logged separately |
+| Twilio credentials stored as GitHub Secrets | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`, `WHATSAPP_RECIPIENTS` |
+
 ---
 
 #### 🧠 Epic 3 — Home Intelligence
@@ -216,17 +226,17 @@
 
 | Story | Notes |
 |---|---|
-| SMS delivery | Twilio — useful as backup or for urgent-only pings |
 | French language option | Key for Improve So LLC productization in West Africa |
 | Weekly micro-reminders | Mid-month nudges for urgent seasonal items |
 | Web dashboard + task history | Track North Star metric over time |
 | Multi-home support | If Vigile becomes a product via Improve So LLC |
+| WhatsApp reply parsing | Parse "done" or "snooze 7d" replies from WhatsApp to track task completion |
 
 ---
 
 ## 6. MVP Scope
 
-### ✅ In MVP
+### ✅ In MVP (v1.0 — complete)
 - Python script calling Claude API (claude-sonnet-4-20250514)
 - Full home systems inventory in system prompt
 - Dynamic month/season awareness
@@ -237,12 +247,19 @@
 - GitHub Secrets for all credentials
 - README with full setup guide
 
-### ❌ Out of MVP
+### 🔜 Planned — v1.1 (WhatsApp)
+- WhatsApp delivery via Twilio API (same trigger as email)
+- Plain-text brief sent to all WHATSAPP_RECIPIENTS numbers
+- Independent failure handling — WhatsApp failure does not block email
+- Four new GitHub Secrets: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`, `WHATSAPP_RECIPIENTS`
+- `twilio` added to `requirements.txt`
+
+### ❌ Out of scope
 - Web UI or dashboard
-- SMS delivery
 - French language option
 - Task completion tracking
 - Multi-home support
+- WhatsApp reply parsing (future backlog)
 
 ---
 
@@ -354,5 +371,5 @@ HOUSTON BLIND SPOTS (flag seasonally):
 
 ---
 
-*Document version: 1.1 — March 2026*
+*Document version: 1.2 — March 2026*
 *Owner: Ablo (Abdoulaye Sow) — Improve So LLC*
