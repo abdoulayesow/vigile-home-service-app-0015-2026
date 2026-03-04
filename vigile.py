@@ -10,10 +10,13 @@ from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+import json
+import urllib.request
+
 import anthropic
 
 SYSTEM_PROMPT = """\
-You are Vigile, a personal home guardian for Ablo — a Senior Agile Coach based in South Conroe,
+You are Vigile by Ablo, a personal home guardian for Ablo — a Senior Agile Coach based in South Conroe,
 Texas. You know his home inside out and deliver a warm, precise, hyper-local monthly maintenance
 brief.
 
@@ -128,10 +131,17 @@ Produce exactly these 6 sections, in this order:
 """
 
 SECTION_STYLES = {
-    "🔴": ("#c0392b", "#fff5f5"),
-    "🟡": ("#d68910", "#fffbf0"),
-    "🟢": ("#1e8449", "#f0fff4"),
-    "💡": ("#2471a3", "#f0f8ff"),
+    "🔴": ("#e53e3e", "#ffffff"),
+    "🟡": ("#d97706", "#ffffff"),
+    "🟢": ("#38a169", "#ffffff"),
+    "💡": ("#3182ce", "#ffffff"),
+}
+
+SECTION_BADGES = {
+    "🔴": "URGENT",
+    "🟡": "SOON",
+    "🟢": "ROUTINE",
+    "💡": "TIP",
 }
 
 
@@ -180,78 +190,100 @@ def _parse_sections(brief_text: str) -> list[tuple[str | None, str, str, str]]:
 
 
 def _render_section_card(emoji: str | None, color: str, bg: str, content: str) -> str:
-    is_header = emoji is not None
-    border = f"4px solid {color}"
+    border_color = color if emoji is not None else "#94a3b8"
     card_style = (
-        f"background: {bg};"
-        f" border-left: {border};"
-        " border-radius: 6px;"
-        " padding: 16px 20px;"
-        " margin: 16px 0;"
+        f"background: #ffffff;"
+        f" border-left: 4px solid {border_color};"
+        " padding: 20px 24px;"
+        " margin: 0;"
+        " border-bottom: 1px solid #e8e8e8;"
     )
-    text_style = (
-        "font-family: Georgia, 'Times New Roman', serif;"
+    body_style = (
+        "font-family: system-ui, -apple-system, Arial, sans-serif;"
         " font-size: 15px;"
-        " line-height: 1.7;"
-        " color: #2c2c2c;"
+        " line-height: 1.6;"
+        " color: #374151;"
         " margin: 0;"
     )
-    if is_header:
-        # Split first line (header) from body lines
+    if emoji is not None:
+        badge_label = SECTION_BADGES.get(emoji, "")
+        badge_style = (
+            f"background: {color};"
+            " color: #ffffff;"
+            " font-family: system-ui, -apple-system, Arial, sans-serif;"
+            " font-size: 10px;"
+            " font-weight: bold;"
+            " letter-spacing: 1px;"
+            " padding: 2px 8px;"
+            " border-radius: 10px;"
+            " vertical-align: middle;"
+            " margin-left: 8px;"
+        )
+        header_style = (
+            "font-family: system-ui, -apple-system, Arial, sans-serif;"
+            " font-size: 16px;"
+            " font-weight: bold;"
+            f" color: {color};"
+            " margin: 0 0 12px 0;"
+        )
         parts = content.split("<br>", 1)
         header_html = (
-            f'<p style="font-family: Georgia, serif; font-size: 17px;'
-            f' font-weight: bold; color: {color}; margin: 0 0 10px 0;">'
-            f"{parts[0]}</p>"
+            f'<p style="{header_style}">'
+            f"{parts[0]}"
+            f' <span style="{badge_style}">{badge_label}</span>'
+            f"</p>"
         )
         body_html = (
-            f'<p style="{text_style}">{parts[1]}</p>'
+            f'<p style="{body_style}">{parts[1]}</p>'
             if len(parts) > 1 and parts[1]
             else ""
         )
         return f'<div style="{card_style}">{header_html}{body_html}</div>'
-    return f'<div style="{card_style}"><p style="{text_style}">{content}</p></div>'
+    return f'<div style="{card_style}"><p style="{body_style}">{content}</p></div>'
 
 
 def _wrap_html_document(body: str, month_name: str, year: int) -> str:
     outer = (
-        "font-family: Georgia, 'Times New Roman', serif;"
-        " background: #f4f1ec;"
+        "font-family: system-ui, -apple-system, Arial, sans-serif;"
+        " background: #f0f2f5;"
         " margin: 0; padding: 32px 16px;"
     )
     container = (
         "background: #ffffff;"
-        " max-width: 620px;"
+        " max-width: 600px;"
         " margin: 0 auto;"
-        " border-radius: 10px;"
+        " border-radius: 8px;"
         " overflow: hidden;"
-        " box-shadow: 0 2px 12px rgba(0,0,0,0.08);"
+        " box-shadow: 0 2px 16px rgba(0,0,0,0.10);"
     )
-    header = "background: #1a2e1a; padding: 28px 32px 24px; text-align: center;"
+    header = (
+        "background: #1a472a;"
+        " background: linear-gradient(135deg, #1a472a 0%, #2d6a4f 100%);"
+        " padding: 32px;"
+        " text-align: center;"
+    )
     logo_style = (
-        "font-family: Georgia, serif;"
+        "font-family: system-ui, -apple-system, Arial, sans-serif;"
         " font-size: 26px;"
         " font-weight: bold;"
-        " color: #e8dfc8;"
-        " margin: 0 0 4px 0;"
-        " letter-spacing: 1px;"
+        " color: #ffffff;"
+        " margin: 0 0 6px 0;"
+        " letter-spacing: 0.5px;"
     )
     date_style = (
-        "font-family: Georgia, serif;"
+        "font-family: system-ui, -apple-system, Arial, sans-serif;"
         " font-size: 13px;"
-        " color: #8fa68f;"
+        " color: rgba(255,255,255,0.75);"
         " margin: 0;"
         " letter-spacing: 2px;"
         " text-transform: uppercase;"
     )
-    content_style = "padding: 24px 32px 32px;"
     footer_style = (
-        "border-top: 1px solid #ede8df;"
-        " padding: 16px 32px;"
+        "padding: 20px 32px;"
         " text-align: center;"
-        " font-family: Georgia, serif;"
+        " font-family: system-ui, -apple-system, Arial, sans-serif;"
         " font-size: 12px;"
-        " color: #aaa;"
+        " color: #9ca3af;"
     )
     return (
         "<!DOCTYPE html>\n"
@@ -259,18 +291,16 @@ def _wrap_html_document(body: str, month_name: str, year: int) -> str:
         "<head>"
         '<meta charset="UTF-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
-        f"<title>Vigile — {html.escape(month_name)} {year}</title>"
+        f"<title>Vigile by Ablo — {html.escape(month_name)} {year}</title>"
         "</head>\n"
         f'<body style="{outer}">\n'
         f'  <div style="{container}">\n'
         f'    <div style="{header}">\n'
-        f'      <p style="{logo_style}">🏠 Vigile</p>\n'
+        f'      <p style="{logo_style}">🏠 Vigile by Ablo</p>\n'
         f'      <p style="{date_style}">{html.escape(month_name)} {year}</p>\n'
         "    </div>\n"
-        f'    <div style="{content_style}">\n'
         f"{body}\n"
-        "    </div>\n"
-        f'    <div style="{footer_style}">Your home, looked after.</div>\n'
+        f'    <div style="{footer_style}">Your home, looked after. · Vigile by Ablo</div>\n'
         "  </div>\n"
         "</body>\n"
         "</html>"
@@ -304,6 +334,71 @@ def send_email(
         smtp.starttls()
         smtp.login(sender, password)
         smtp.sendmail(sender, recipients, msg.as_string())
+
+
+def send_whatsapp(plain_body: str, month_name: str, year: int) -> None:
+    """Send a WhatsApp message via Meta Cloud API. Non-fatal — logs and returns on any error."""
+    token = os.environ.get("WHATSAPP_TOKEN")
+    phone_number_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
+    recipients_raw = os.environ.get("WHATSAPP_RECIPIENTS", "")
+    if not all([token, phone_number_id, recipients_raw]):
+        print("WhatsApp secrets not configured — skipping.")
+        return
+    recipients = [r.strip() for r in recipients_raw.split(",") if r.strip()]
+    message = (
+        f"🏠 Vigile by Ablo — {month_name} {year} Home Brief\n\n{plain_body[:1000]}"
+    )
+    url = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    try:
+        for recipient in recipients:
+            payload = json.dumps(
+                {
+                    "messaging_product": "whatsapp",
+                    "to": recipient,
+                    "type": "text",
+                    "text": {"body": message},
+                }
+            ).encode()
+            req = urllib.request.Request(
+                url, data=payload, headers=headers, method="POST"
+            )
+            with urllib.request.urlopen(req) as resp:
+                resp.read()
+        print(f"WhatsApp sent to {len(recipients)} recipient(s).")
+    except Exception as exc:  # non-fatal
+        print(f"WhatsApp send failed (non-fatal): {exc}")
+
+
+def send_telegram(plain_body: str, month_name: str, year: int) -> None:
+    """Send a Telegram message via Bot API. Non-fatal — logs and returns on any error."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_ids_raw = os.environ.get("TELEGRAM_CHAT_IDS", "")
+    if not all([token, chat_ids_raw]):
+        print("Telegram secrets not configured — skipping.")
+        return
+    chat_ids = [c.strip() for c in chat_ids_raw.split(",") if c.strip()]
+    message = (
+        f"🏠 Vigile by Ablo — {month_name} {year} Home Brief\n\n{plain_body[:4000]}"
+    )
+    try:
+        for chat_id in chat_ids:
+            payload = json.dumps({"chat_id": chat_id, "text": message}).encode()
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req) as resp:
+                resp.read()
+        print(f"Telegram sent to {len(chat_ids)} chat(s).")
+    except Exception as exc:  # non-fatal
+        print(f"Telegram send failed (non-fatal): {exc}")
 
 
 def main() -> None:
@@ -356,7 +451,7 @@ def main() -> None:
         print(f"Error calling Anthropic API: {e}")
         sys.exit(1)
 
-    subject = f"🏠 Vigile — {month_name} {year} Home Brief"
+    subject = f"🏠 Vigile by Ablo — {month_name} {year} Home Brief"
     html_body = build_html(brief_text, month_name, year)
 
     try:
@@ -378,6 +473,10 @@ def main() -> None:
     print(
         f"Vigile brief sent for {month_name} {year} to {len(recipients)} recipient(s)."
     )
+
+    send_whatsapp(brief_text, month_name, year)
+    send_telegram(brief_text, month_name, year)
+
     sys.exit(0)
 
 
