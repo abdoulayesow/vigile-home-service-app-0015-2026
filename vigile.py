@@ -278,6 +278,7 @@ _DATE_STYLE = (
     f"font-family: {_FONT};"
     " font-size: 11px;"
     " font-weight: 600;"
+    " color: #9fd4b8;"  # Outlook fallback (~rgba(255,255,255,0.70) on #1b4332)
     " color: rgba(255,255,255,0.70);"
     " margin: 0;"
     " letter-spacing: 3px;"
@@ -316,13 +317,66 @@ def _wrap_html_document(body: str, month_name: str, year: int) -> str:
     )
 
 
-def build_html(brief_text: str, month_name: str, year: int) -> str:
-    sections = _parse_sections(brief_text)
+def _build_html_from_sections(
+    sections: list[tuple[str | None, str, str]], month_name: str, year: int
+) -> str:
     cards = "\n".join(
         _render_section_card(emoji, color, content)
         for emoji, color, content in sections
     )
     return _wrap_html_document(cards, month_name, year)
+
+
+def build_html(brief_text: str, month_name: str, year: int) -> str:
+    sections = _parse_sections(brief_text)
+    return _build_html_from_sections(sections, month_name, year)
+
+
+def save_to_gist(
+    sections: list[tuple[str | None, str, str]], month_name: str, year: int, season: str
+) -> None:
+    """Write the parsed brief to a GitHub Gist as JSON. Non-fatal — logs and returns on any error."""
+    token = os.environ.get("GIST_TOKEN")
+    gist_id = os.environ.get("GIST_ID")
+    if not all([token, gist_id]):
+        print("Gist secrets not configured — skipping dashboard save.")
+        return
+    brief_json = json.dumps(
+        {
+            "month": month_name,
+            "year": year,
+            "season": season,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "sections": [
+                {
+                    "emoji": e,
+                    "color": c,
+                    "badge": SECTION_BADGES.get(e) if e else None,
+                    "content": ct,
+                }
+                for e, c, ct in sections
+            ],
+        }
+    )
+    payload = json.dumps(
+        {"files": {"vigile-brief.json": {"content": brief_json}}}
+    ).encode()
+    req = urllib.request.Request(
+        f"https://api.github.com/gists/{gist_id}",
+        data=payload,
+        method="PATCH",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            resp.read()
+        print("Brief saved to Gist for dashboard.")
+    except Exception as e:
+        print(f"Gist save failed (non-fatal): {e}")
 
 
 def send_email(
@@ -461,7 +515,8 @@ def main() -> None:
         sys.exit(1)
 
     subject = f"🏠 Vigile by Ablo — {month_name} {year} Home Brief"
-    html_body = build_html(brief_text, month_name, year)
+    sections = _parse_sections(brief_text)
+    html_body = _build_html_from_sections(sections, month_name, year)
 
     try:
         send_email(
@@ -485,6 +540,7 @@ def main() -> None:
 
     send_whatsapp(brief_text, month_name, year)
     send_telegram(brief_text, month_name, year)
+    save_to_gist(sections, month_name, year, season)
 
 
 if __name__ == "__main__":

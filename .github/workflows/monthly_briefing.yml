@@ -34,3 +34,6 @@ jobs:
           # Optional — Telegram delivery via Bot API (leave unset to skip)
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_IDS: ${{ secrets.TELEGRAM_CHAT_IDS }}
+          # Optional — Dashboard Gist save (leave unset to skip)
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          GIST_ID: ${{ secrets.GIST_ID }}
