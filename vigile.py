@@ -15,7 +15,7 @@ from email.mime.text import MIMEText
 import anthropic
 
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
-MAX_TOKENS = 1500
+MAX_TOKENS = 2500
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587  # Gmail SMTP with STARTTLS
 
@@ -105,13 +105,16 @@ brief.
 
 ## Brief Format
 
-Produce exactly these 6 sections, in this order:
+Produce the following sections in this order. Include only sections that are relevant —
+if nothing genuinely qualifies for a section, omit it entirely rather than filling it
+with low-priority content.
 
 1. Warm greeting — Address Ablo by name. Reference the month, season, and one vivid climate
-   detail for South Conroe. 2-3 sentences. Human and warm.
+   detail for South Conroe. 2-3 sentences. Human and warm. Always include this.
 
 2. 🔴 Urgent — Tasks that cannot wait; risk of damage or costly consequences if skipped
-   this month. Be specific about why it is urgent now.
+   this month. Be specific about why it is urgent now. Omit this section if nothing is
+   truly urgent — do not inflate priority to fill it.
 
 3. 🟡 This Month — Scheduled maintenance due this month. Actionable and specific.
    Include product names (Baby Filter 2.0, Deebot, etc.) where relevant.
@@ -124,7 +127,7 @@ Produce exactly these 6 sections, in this order:
    in his specific context.
 
 6. Closing nudge — One warm, human sentence. Not corporate. Acknowledges his full plate
-   and encourages action.
+   and encourages action. Always include this.
 
 ## Tone Rules
 - Warm, human, and precise — like a knowledgeable friend who cares about Ablo's home
@@ -133,13 +136,6 @@ Produce exactly these 6 sections, in this order:
 - Acknowledge his context (busy professional, young family) where natural
 - Never overwhelming — prioritize ruthlessly
 """
-
-SECTION_STYLES = {
-    "🔴": "#e53e3e",
-    "🟡": "#d97706",
-    "🟢": "#38a169",
-    "💡": "#3182ce",
-}
 
 SECTION_BADGES = {
     "🔴": "URGENT",
@@ -176,12 +172,12 @@ def _parse_sections(brief_text: str) -> list[tuple[str | None, str, str]]:
     for line in brief_text.split("\n"):
         stripped = line.strip()
         matched = False
-        for emoji, color in SECTION_STYLES.items():
+        for emoji, accents in _SECTION_ACCENTS.items():
             if stripped.startswith(emoji):
                 flush()
                 current_lines = [stripped]
                 current_emoji = emoji
-                current_color = color
+                current_color = accents["border"]
                 matched = True
                 break
         if not matched:
@@ -191,127 +187,155 @@ def _parse_sections(brief_text: str) -> list[tuple[str | None, str, str]]:
     return sections
 
 
-_FONT = "system-ui, -apple-system, Arial, sans-serif"
-_BODY_STYLE = (
-    f"font-family: {_FONT};"
-    " font-size: 15px;"
-    " line-height: 1.65;"
-    " color: #374151;"
-    " margin: 0;"
-)
-_CARD_BASE = (
-    "background: #ffffff;"
-    " padding: 22px 28px;"
-    " margin: 0;"
-    " border-bottom: 1px solid #e8e8e8;"
-)
+_FONT_DISPLAY = "Georgia, 'Times New Roman', serif"
+_FONT_BODY = "system-ui, -apple-system, 'Segoe UI', Arial, sans-serif"
+
+# Brand palette
+_GREEN_DEEP = "#1b4332"
+_GREEN_MID = "#2d6a4f"
+_TEXT_PRIMARY = "#1a1a2e"
+_TEXT_SECONDARY = "#4a5568"
+_TEXT_MUTED = "#718096"
+_BG_WARM = "#faf9f7"
+_BG_CARD = "#ffffff"
+_BORDER_SUBTLE = "#e8e6e1"
+
+# Accent colors per section — slightly muted, sophisticated variants
+_SECTION_ACCENTS = {
+    "🔴": {
+        "bg": "#fef2f2",
+        "border": "#dc2626",
+        "text": "#991b1b",
+    },
+    "🟡": {
+        "bg": "#fffbeb",
+        "border": "#d97706",
+        "text": "#92400e",
+    },
+    "🟢": {
+        "bg": "#f0fdf4",
+        "border": "#16a34a",
+        "text": "#166534",
+    },
+    "💡": {
+        "bg": "#eff6ff",
+        "border": "#2563eb",
+        "text": "#1e40af",
+    },
+}
 
 
 def _render_section_card(emoji: str | None, color: str, content: str) -> str:
-    border_color = color if emoji is not None else "#d1d5db"
-    card_style = f"{_CARD_BASE} border-left: 5px solid {border_color};"
     if emoji is None:
-        return f'<div style="{card_style}"><p style="{_BODY_STYLE}">{content}</p></div>'
+        # Greeting / closing — elegant serif text, no card chrome
+        return (
+            f'<div style="padding: 28px 40px; font-family: {_FONT_DISPLAY};'
+            f' font-size: 16px; line-height: 1.7; color: {_TEXT_PRIMARY};">'
+            f"{content}"
+            "</div>"
+        )
 
+    accents = _SECTION_ACCENTS.get(
+        emoji,
+        {
+            "bg": _BG_CARD,
+            "border": color,
+            "text": color,
+        },
+    )
     badge_label = SECTION_BADGES.get(emoji, "")
-    badge_style = (
-        f"background: {color};"
-        " color: #ffffff;"
-        f" font-family: {_FONT};"
-        " font-size: 9px;"
-        " font-weight: bold;"
-        " letter-spacing: 1.5px;"
-        " text-transform: uppercase;"
-        " padding: 2px 7px;"
-        " border-radius: 3px;"
-        " vertical-align: middle;"
-        " margin-left: 8px;"
-    )
-    header_style = (
-        f"font-family: {_FONT};"
-        " font-size: 15px;"
-        " font-weight: 700;"
-        f" color: {color};"
-        " margin: 0 0 12px 0;"
-    )
     parts = content.split("<br>", 1)
-    header_html = (
-        f'<p style="{header_style}">'
-        f"{parts[0]}"
-        f' <span style="{badge_style}">{badge_label}</span>'
-        f"</p>"
-    )
-    body_html = (
-        f'<p style="{_BODY_STYLE}">{parts[1]}</p>'
-        if len(parts) > 1 and parts[1]
-        else ""
-    )
-    return f'<div style="{card_style}">{header_html}{body_html}</div>'
+    header_text = parts[0]
+    body_text = parts[1] if len(parts) > 1 and parts[1] else ""
 
+    body_html = ""
+    if body_text:
+        body_html = (
+            f'<div style="padding: 0 24px 20px 24px; font-family: {_FONT_BODY};'
+            f' font-size: 14px; line-height: 1.7; color: {_TEXT_SECONDARY};">'
+            f"{body_text}"
+            "</div>"
+        )
 
-_OUTER_STYLE = (
-    f"font-family: {_FONT}; background: #f5f4f0; margin: 0; padding: 32px 16px;"
-)
-_CONTAINER_STYLE = (
-    "background: #ffffff;"
-    " max-width: 600px;"
-    " margin: 0 auto;"
-    " border-radius: 8px;"
-    " overflow: hidden;"
-    " box-shadow: 0 4px 24px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.04);"
-)
-_HEADER_STYLE = (
-    "background: #1b4332;"
-    " background: linear-gradient(180deg, #1b4332 0%, #2d6a4f 100%);"
-    " padding: 36px 40px;"
-    " text-align: center;"
-)
-_LOGO_STYLE = (
-    f"font-family: {_FONT};"
-    " font-size: 28px;"
-    " font-weight: 700;"
-    " color: #ffffff;"
-    " margin: 0 0 8px 0;"
-    " letter-spacing: -0.5px;"
-)
-_DATE_STYLE = (
-    f"font-family: {_FONT};"
-    " font-size: 11px;"
-    " font-weight: 600;"
-    " color: #9fd4b8;"  # Outlook fallback (~rgba(255,255,255,0.70) on #1b4332)
-    " color: rgba(255,255,255,0.70);"
-    " margin: 0;"
-    " letter-spacing: 3px;"
-    " text-transform: uppercase;"
-)
-_FOOTER_STYLE = (
-    "padding: 24px 32px;"
-    " text-align: center;"
-    f" font-family: {_FONT};"
-    " font-size: 13px;"
-    " color: #6b7280;"
-    " border-top: 1px solid #e5e7eb;"
-)
+    badge_html = (
+        f'<span style="display: inline-block; background: {accents["border"]};'
+        " color: #ffffff;"
+        f" font-family: {_FONT_BODY};"
+        " font-size: 9px; font-weight: 700; letter-spacing: 1.2px;"
+        " text-transform: uppercase; padding: 3px 8px; border-radius: 3px;"
+        f' margin-left: 10px; vertical-align: middle;">{badge_label}</span>'
+    )
+
+    return (
+        f'<div style="margin: 0 40px 16px 40px; border-radius: 8px;'
+        f' overflow: hidden; background: {accents["bg"]};">'
+        # Colored top bar
+        f'<div style="background: {accents["border"]}; height: 3px;"></div>'
+        # Header with badge
+        f'<div style="padding: 20px 24px 8px 24px; font-family: {_FONT_DISPLAY};'
+        f" font-size: 17px; font-weight: 700; color: {accents['text']};"
+        f' line-height: 1.3;">'
+        f"{header_text}{badge_html}"
+        "</div>"
+        # Body text
+        f"{body_html}"
+        "</div>"
+    )
 
 
 def _wrap_html_document(body: str, month_name: str, year: int) -> str:
+    month_esc = html.escape(month_name)
     return (
         "<!DOCTYPE html>\n"
         '<html lang="en">\n'
         "<head>"
         '<meta charset="UTF-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
-        f"<title>Vigile by Ablo — {html.escape(month_name)} {year}</title>"
+        f"<title>Vigile by Ablo — {month_esc} {year}</title>"
         "</head>\n"
-        f'<body style="{_OUTER_STYLE}">\n'
-        f'  <div style="{_CONTAINER_STYLE}">\n'
-        f'    <div style="{_HEADER_STYLE}">\n'
-        f'      <p style="{_LOGO_STYLE}">🏠 Vigile by Ablo</p>\n'
-        f'      <p style="{_DATE_STYLE}">{html.escape(month_name)} {year}</p>\n'
-        "    </div>\n"
+        f'<body style="margin: 0; padding: 0; background: {_BG_WARM};'
+        f' font-family: {_FONT_BODY};">\n'
+        # Centering wrapper
+        f'<div style="background: {_BG_WARM}; padding: 40px 16px;">\n'
+        # Main container
+        f'<div style="max-width: 600px; margin: 0 auto; background: {_BG_CARD};'
+        ' border-radius: 12px; overflow: hidden;">\n'
+        # Header
+        f'<div style="background: {_GREEN_DEEP};'
+        f" background: linear-gradient(180deg, {_GREEN_DEEP} 0%, {_GREEN_MID} 100%);"
+        ' padding: 44px 40px 40px 40px; text-align: center;">\n'
+        # Vigile wordmark
+        f'<p style="font-family: {_FONT_DISPLAY}; font-size: 32px;'
+        " font-weight: 700; color: #ffffff; margin: 0 0 4px 0;"
+        ' letter-spacing: -0.5px;">Vigile</p>\n'
+        f'<p style="font-family: {_FONT_BODY}; font-size: 12px;'
+        " color: #9fd4b8; color: rgba(255,255,255,0.60);"
+        " margin: 0 0 20px 0; letter-spacing: 2px;"
+        ' text-transform: uppercase;">by Ablo</p>\n'
+        # Month/year pill
+        f'<span style="display: inline-block; background: #345e4a; background: rgba(255,255,255,0.12);'
+        f" font-family: {_FONT_BODY}; font-size: 11px; font-weight: 700;"
+        " color: #ffffff; letter-spacing: 3px; text-transform: uppercase;"
+        f' padding: 6px 20px; border-radius: 20px;">'
+        f"{month_esc} {year}"
+        "</span>\n"
+        "</div>\n"
+        # Spacer before cards
+        '<div style="height: 24px;"></div>\n'
+        # Section cards
         f"{body}\n"
-        f'    <div style="{_FOOTER_STYLE}">Your home, looked after. · Vigile by Ablo</div>\n'
-        "  </div>\n"
+        # Spacer after cards
+        '<div style="height: 8px;"></div>\n'
+        # Footer
+        f'<div style="padding: 24px 40px 32px 40px; text-align: center;'
+        f' border-top: 1px solid {_BORDER_SUBTLE};">'
+        f'<p style="font-family: {_FONT_BODY}; font-size: 12px;'
+        f' color: {_TEXT_MUTED}; margin: 0; letter-spacing: 0.5px;">'
+        "Your home, looked after."
+        "</p>"
+        "</div>\n"
+        "</div>\n"
+        "</div>\n"
         "</body>\n"
         "</html>"
     )

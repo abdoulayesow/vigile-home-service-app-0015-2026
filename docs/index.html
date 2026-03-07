@@ -15,8 +15,8 @@
       --border:        rgba(255,255,255,0.08);
       --border-hover:  rgba(255,255,255,0.14);
       --text:          #e8f0ec;
-      --text-muted:    #6b8578;
-      --text-dim:      #3d5447;
+      --text-muted:    #8ba898;
+      --text-dim:      #5a7a6a;
       --green-dark:    #2d6a4f;
       --green:         #38a169;
       --green-glow:    rgba(56,161,105,0.25);
@@ -518,7 +518,7 @@
         aria-label="6-digit PIN"
       >
       <button id="unlock-btn">Unlock</button>
-      <p id="pin-error-msg" role="alert" aria-live="polite"></p>
+      <p id="pin-error-msg" role="alert"></p>
     </div>
   </div>
 
@@ -527,7 +527,7 @@
 
     <header class="dash-header">
       <div>
-        <div class="dash-wordmark">🏠 Vigile by Ablo</div>
+        <h1 class="dash-wordmark">🏠 Vigile by Ablo</h1>
         <div class="dash-subtitle" id="dash-subtitle">Loading…</div>
         <div class="dash-generated" id="dash-generated"></div>
       </div>
@@ -541,7 +541,7 @@
         <span class="progress-label-text">Sections reviewed</span>
         <span class="progress-count" id="progress-count">0 / 0</span>
       </div>
-      <div class="progress-track">
+      <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuenow="0" aria-valuemax="0" aria-label="Sections reviewed">
         <div class="progress-fill" id="progress-fill" style="width:0%"></div>
       </div>
     </div>
@@ -613,6 +613,7 @@
         dashboard.style.animation = '';
       });
       loadBrief();
+      logoutBtn.focus();
     }
 
     function showPin() {
@@ -631,17 +632,27 @@
       const entered = pinInput.value.trim();
       if (entered.length === 0) return;
 
-      const hash = await sha256hex(entered);
-      if (hash === PIN_HASH) {
-        sessionStorage.setItem('vigile_unlocked', '1');
-        showDashboard();
-      } else {
-        pinInput.classList.add('pin-error');
-        pinErrorMsg.textContent = 'Incorrect PIN — try again.';
-        pinInput.value = '';
-        setTimeout(() => {
-          pinInput.classList.remove('pin-error');
-        }, 600);
+      if (!crypto?.subtle) {
+        pinErrorMsg.textContent = 'Secure context required — open via HTTPS or localhost.';
+        return;
+      }
+
+      try {
+        const hash = await sha256hex(entered);
+        if (hash === PIN_HASH) {
+          sessionStorage.setItem('vigile_unlocked', '1');
+          showDashboard();
+        } else {
+          pinInput.classList.add('pin-error');
+          pinErrorMsg.textContent = 'Incorrect PIN — try again.';
+          pinInput.value = '';
+          setTimeout(() => {
+            pinInput.classList.remove('pin-error');
+          }, 600);
+        }
+      } catch (err) {
+        console.error('PIN verification failed:', err);
+        pinErrorMsg.textContent = 'Something went wrong — please try again.';
       }
     }
 
@@ -679,8 +690,9 @@
             Check your Gist configuration — make sure <code>GIST_OWNER</code> and
             <code>GIST_ID</code> are set correctly in <code>docs/index.html</code>.
           </div>
-          <button class="retry-btn" onclick="loadBrief()">Retry</button>
+          <button class="retry-btn" id="retry-btn">Retry</button>
         </div>`;
+      document.getElementById('retry-btn').addEventListener('click', loadBrief);
     }
 
     function renderEmpty() {
@@ -796,7 +808,7 @@
         titleRow.appendChild(emojiEl);
       }
 
-      const titleEl = document.createElement('div');
+      const titleEl = document.createElement('h2');
       titleEl.className = 'card-title';
       titleEl.textContent = heading;
       titleRow.appendChild(titleEl);
@@ -830,6 +842,9 @@
 
       const checkbox = document.createElement('div');
       checkbox.className = 'custom-checkbox' + (isReviewed ? ' checked' : '');
+      checkbox.setAttribute('role', 'checkbox');
+      checkbox.setAttribute('aria-checked', String(isReviewed));
+      checkbox.setAttribute('tabindex', '0');
       checkbox.innerHTML = '<span class="check-icon">✓</span>';
 
       const labelText = document.createElement('span');
@@ -839,9 +854,10 @@
       label.appendChild(labelText);
       label.style.cursor = 'pointer';
 
-      label.addEventListener('click', () => {
+      function toggleReview() {
         const nowReviewed = !checkbox.classList.contains('checked');
         checkbox.classList.toggle('checked', nowReviewed);
+        checkbox.setAttribute('aria-checked', String(nowReviewed));
         card.classList.toggle('reviewed', nowReviewed);
         labelText.textContent = nowReviewed ? 'Reviewed' : 'Mark reviewed';
 
@@ -853,6 +869,14 @@
 
         // Re-count progress from DOM
         updateProgressFromDOM();
+      }
+
+      label.addEventListener('click', toggleReview);
+      checkbox.addEventListener('keydown', (e) => {
+        if (e.key === ' ' || e.key === 'Enter') {
+          e.preventDefault();
+          toggleReview();
+        }
       });
 
       footer.appendChild(label);
@@ -879,6 +903,9 @@
       const pct = total > 0 ? Math.round((done / total) * 100) : 0;
       progressCount.textContent = `${done} / ${total}`;
       progressFill.style.width = pct + '%';
+      const track = progressFill.parentElement;
+      track.setAttribute('aria-valuenow', String(done));
+      track.setAttribute('aria-valuemax', String(total));
     }
 
     // ─── Boot ──────────────────────────────────────────────────────────────────
